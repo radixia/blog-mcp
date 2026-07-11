@@ -1,0 +1,3 @@
+# Copy to .dev.vars (git-ignored) for local `wrangler dev`.
+# Read-only Ghost Content API key.
+GHOST_CONTENT_KEY=your-ghost-content-api-key

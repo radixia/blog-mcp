@@ -1,0 +1,20 @@
+{
+  "name": "radixia-blog-mcp",
+  "main": "index.ts",
+  "compatibility_date": "2025-06-01",
+  "compatibility_flags": ["nodejs_compat"],
+  "migrations": [
+    { "tag": "v1", "new_sqlite_classes": ["RadixiaBlogMCP"] }
+  ],
+  "durable_objects": {
+    "bindings": [
+      { "class_name": "RadixiaBlogMCP", "name": "MCP_OBJECT" }
+    ]
+  },
+  "vars": {
+    "GHOST_URL": "https://blog.radixia.ai"
+    // GHOST_CONTENT_KEY is now a SECRET, not a plaintext var.
+    // Production: `wrangler secret put GHOST_CONTENT_KEY`
+    // Local dev:  put it in .dev.vars (git-ignored). See .dev.vars.example
+  }
+}
