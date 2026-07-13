@@ -240,7 +240,12 @@ export class RadixiaBlogMCP extends McpAgent<Env> {
             const hay = c.x.toLowerCase();
             if (phrases.some((p) => !hay.includes(p))) return { c, score: 0 };
             let score = phrases.length * 5;
-            for (const t of terms) score += hay.split(t).length - 1;
+            for (const t of terms) {
+              score += (hay.split(t).length - 1) * 2; // exact matches weigh double
+              // prefix match so singular/plural and inflections still hit
+              // (e.g. "gigafactory" ~ "gigafactories"), min stem length 5
+              if (t.length >= 6) score += hay.split(t.slice(0, Math.max(5, t.length - 3))).length - 1;
+            }
             return { c, score };
           })
           .filter((x) => x.score > 0 && (terms.length || phrases.length))
