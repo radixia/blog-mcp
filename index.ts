@@ -363,16 +363,21 @@ export default {
       return RadixiaBlogMCP.serveSSE("/sse").fetch(request, env, ctx);
     }
     if (url.pathname === "/.well-known/mcp.json" || url.pathname === "/.well-known/mcp/server-card.json") {
+      // Server card follows the MCP registry server.json schema (the older
+      // "draft/server-card" schema URL no longer resolves); the tool list
+      // rides in the _meta extension point.
       const card =
         url.pathname === "/.well-known/mcp/server-card.json"
           ? {
-              $schema: "https://modelcontextprotocol.io/schemas/draft/server-card.json",
-              serverInfo: { name: "Radixia Blog", version: "1.0.0" },
+              $schema: "https://static.modelcontextprotocol.io/schemas/2025-12-11/server.schema.json",
+              name: "ai.radixia/blog",
+              title: "Radixia Blog MCP",
               description: SERVER_CARD.description,
-              vendor: SERVER_CARD.vendor,
-              transport: { type: "streamable-http", url: `${url.origin}/mcp` },
-              capabilities: { tools: {} },
-              tools: SERVER_CARD.capabilities.tools,
+              version: SERVER_CARD.version,
+              websiteUrl: "https://www.radixia.ai",
+              repository: { url: "https://github.com/radixia/blog-mcp", source: "github" },
+              remotes: [{ type: "streamable-http", url: `${url.origin}/mcp` }],
+              _meta: { "ai.radixia/tools": SERVER_CARD.capabilities.tools },
             }
           : SERVER_CARD;
       return new Response(JSON.stringify(card, null, 2), {
