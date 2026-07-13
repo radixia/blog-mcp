@@ -19,6 +19,8 @@ interface Env {
   GHOST_URL: string;
   GHOST_CONTENT_KEY: string;
   MCP_OBJECT: DurableObjectNamespace;
+  /** Override the ISC corpus base URL (local dev/testing). */
+  ISC_BASE?: string;
 }
 
 interface GhostPost {
@@ -53,6 +55,61 @@ async function ghostFetch(env: Env, resource: string, params: Record<string, str
   throw lastErr;
 }
 
+/* ---------- ISC-HPC 2026 transcript corpus (Radixia Labs) ----------
+   Static corpus published by the website at /labs/isc-2026/: 147 auto-caption
+   session transcripts, chunked with a one-cue overlap. Fetched once per
+   isolate and cached in memory (~1.9 MB JSON). Search UI for humans:
+   https://www.radixia.ai/labs/isc-2026-search */
+const ISC_BASE = "https://www.radixia.ai/labs/isc-2026";
+const ISC_TOOL_URL = "https://www.radixia.ai/labs/isc-2026-search";
+
+interface IscSession { i: number; day: string; time: string; hall: string; title: string }
+interface IscChunk { id: number; s: number; t: string; x: string }
+interface IscAgendaBlock {
+  title: string; day: string; start: string; end: string; place: string; type: string;
+  speakers: { n: string; o: string }[]; talks: { si: number; title: string; time: string }[]; single: boolean;
+}
+
+let iscDataPromise: Promise<{ sessions: IscSession[]; chunks: IscChunk[] }> | null = null;
+let iscAgendaPromise: Promise<IscAgendaBlock[]> | null = null;
+
+function iscData(base = ISC_BASE) {
+  if (!iscDataPromise) {
+    iscDataPromise = fetch(`${base}/data.json`).then((r) => {
+      if (!r.ok) throw new Error(`ISC corpus fetch failed (${r.status})`);
+      return r.json();
+    });
+    iscDataPromise.catch(() => { iscDataPromise = null; }); // allow retry
+  }
+  return iscDataPromise;
+}
+function iscAgenda(base = ISC_BASE) {
+  if (!iscAgendaPromise) {
+    iscAgendaPromise = fetch(`${base}/agenda.json`).then((r) => {
+      if (!r.ok) throw new Error(`ISC agenda fetch failed (${r.status})`);
+      return r.json();
+    });
+    iscAgendaPromise.catch(() => { iscAgendaPromise = null; });
+  }
+  return iscAgendaPromise;
+}
+
+const iscSessionLine = (s: IscSession) =>
+  [s.title, [s.day, s.time, s.hall].filter(Boolean).join(" · ") || "paper recording"].join(" — ");
+
+/** Chunks carry a one-cue overlap; trim it when stitching a full transcript. */
+function iscTrimOverlap(prev: string, cur: string) {
+  const max = Math.min(prev.length, cur.length, 400);
+  for (let k = max; k >= 5; k--) {
+    if (prev.endsWith(cur.slice(0, k))) return cur.slice(k);
+  }
+  return cur;
+}
+
+const ISC_DISCLAIMER =
+  "Transcripts are auto-generated captions: names and technical terms may contain recognition errors — verify quotes against the session recordings. Independent tool, not affiliated with ISC. Timestamps are offsets into each recording. Human-friendly search UI: " +
+  ISC_TOOL_URL;
+
 const postCard = (p: GhostPost) =>
   [
     `## ${p.title}`,
@@ -71,7 +128,7 @@ const postCard = (p: GhostPost) =>
 export class RadixiaBlogMCP extends McpAgent<Env> {
   server = new McpServer({
     name: "Radixia Blog",
-    version: "1.0.0",
+    version: "1.1.0",
   });
 
   async init() {
@@ -167,6 +224,85 @@ export class RadixiaBlogMCP extends McpAgent<Env> {
     );
 
     this.server.tool(
+      "search_isc2026_transcripts",
+      "Full-text search across 147 auto-generated session transcripts from ISC High Performance 2026 (Hamburg, June 23-25): keynotes, panels, vendor talks, research papers. Returns matching passages with session title, day/time/hall and recording timestamp. Quoted phrases must match exactly.",
+      {
+        query: z.string().min(2).describe("Search terms; wrap exact phrases in double quotes"),
+        limit: z.number().min(1).max(25).default(8).describe("Max passages to return"),
+      },
+      async ({ query, limit }) => {
+        const { sessions, chunks } = await iscData(this.env.ISC_BASE);
+        const phrases: string[] = [];
+        const rest = query.replace(/"([^"]+)"?/g, (_m, p) => { if (p.trim()) phrases.push(p.trim().toLowerCase()); return " "; });
+        const terms = rest.toLowerCase().split(/\s+/).filter(Boolean);
+        const scored = chunks
+          .map((c) => {
+            const hay = c.x.toLowerCase();
+            if (phrases.some((p) => !hay.includes(p))) return { c, score: 0 };
+            let score = phrases.length * 5;
+            for (const t of terms) score += hay.split(t).length - 1;
+            return { c, score };
+          })
+          .filter((x) => x.score > 0 && (terms.length || phrases.length))
+          .sort((a, b) => b.score - a.score)
+          .slice(0, limit);
+        if (!scored.length)
+          return { content: [{ type: "text", text: `No transcript passages matched "${query}". ${ISC_DISCLAIMER}` }] };
+        const text = scored
+          .map(({ c }) => `## ${iscSessionLine(sessions[c.s])} @ ${c.t}\n${c.x}`)
+          .join("\n\n---\n\n") + `\n\n(${ISC_DISCLAIMER})`;
+        return { content: [{ type: "text", text }] };
+      },
+    );
+
+    this.server.tool(
+      "get_isc2026_session",
+      "Read the full auto-generated transcript of one ISC 2026 session by (part of) its title. Use search_isc2026_transcripts or get_isc2026_agenda first to find session titles.",
+      {
+        title: z.string().min(3).describe("Session title or a distinctive part of it, e.g. 'Opening Keynote' or 'TOP500'"),
+      },
+      async ({ title }) => {
+        const { sessions, chunks } = await iscData(this.env.ISC_BASE);
+        const q = title.toLowerCase();
+        const s = sessions.find((x) => x.title.toLowerCase() === q) || sessions.find((x) => x.title.toLowerCase().includes(q));
+        if (!s) return { content: [{ type: "text", text: `No ISC 2026 session matching "${title}". Try get_isc2026_agenda for the list.` }] };
+        const list = chunks.filter((c) => c.s === s.i).sort((a, b) => a.id - b.id);
+        const paras: string[] = [];
+        for (let i = 0; i < list.length; i++) {
+          const raw = i === 0 ? list[i].x : iscTrimOverlap(list[i - 1].x, list[i].x).replace(/^\s+/, "");
+          if (raw) paras.push(`[${list[i].t}] ${raw}`);
+        }
+        const text = `# ${iscSessionLine(s)}\n\n${paras.join("\n\n")}\n\n(${ISC_DISCLAIMER})`;
+        return { content: [{ type: "text", text }] };
+      },
+    );
+
+    this.server.tool(
+      "get_isc2026_agenda",
+      "The ISC High Performance 2026 program (Hamburg, June 23-25): session blocks with times, halls, types and speakers, plus the recorded research-paper talks. Optionally filter by day.",
+      {
+        day: z.enum(["Tuesday", "Wednesday", "Thursday"]).optional().describe("Conference day to filter"),
+      },
+      async ({ day }) => {
+        const [agenda, { sessions }] = await Promise.all([iscAgenda(this.env.ISC_BASE), iscData(this.env.ISC_BASE)]);
+        const blocks = agenda.filter((b) => !day || b.day === day);
+        const lines = blocks.map((b) => {
+          const head = `- ${b.start}${b.end ? "–" + b.end : ""} · ${b.day} · ${b.place || "?"} · [${b.type}] ${b.title}`;
+          const sp = b.speakers?.length ? `\n  speakers: ${b.speakers.map((x) => x.n + (x.o ? ` (${x.o})` : "")).join(", ")}` : "";
+          const talks = !b.single && b.talks?.length ? "\n" + b.talks.map((t) => `    · ${t.time ? t.time + " " : ""}${t.title}`).join("\n") : "";
+          return head + sp + talks;
+        });
+        const papers = !day ? sessions.filter((s) => s.day === "Paper session").map((s) => `- [Research Paper] ${s.title}`) : [];
+        const text = [
+          lines.join("\n") || "(no blocks for that day)",
+          papers.length ? `\n## Recorded research-paper talks\n${papers.join("\n")}` : "",
+          `\n(${ISC_DISCLAIMER})`,
+        ].join("\n");
+        return { content: [{ type: "text", text }] };
+      },
+    );
+
+    this.server.tool(
       "about_radixia",
       "Who is Radixia? Company profile, the four pillars, projects and contacts.",
       {},
@@ -200,11 +336,16 @@ Authors: Luca Bianchi, Marco D'Angelo.`,
 const SERVER_CARD = {
   name: "Radixia Blog",
   description:
-    "Public, read-only MCP server for the Radixia technical blog (AI, serverless architectures, open source, cloud).",
-  version: "1.0.0",
+    "Public, read-only MCP server for the Radixia technical blog (AI, serverless architectures, open source, cloud) and the Radixia Labs ISC-HPC 2026 transcript corpus (147 searchable session transcripts).",
+  version: "1.1.0",
   vendor: { name: "Radixia srl", url: "https://www.radixia.ai" },
   endpoints: { streamableHttp: "/mcp", sse: "/sse" },
-  capabilities: { tools: ["list_posts", "search_posts", "get_post", "list_tags", "about_radixia"] },
+  capabilities: {
+    tools: [
+      "list_posts", "search_posts", "get_post", "list_tags", "about_radixia",
+      "search_isc2026_transcripts", "get_isc2026_session", "get_isc2026_agenda",
+    ],
+  },
 };
 
 export default {
@@ -234,7 +375,7 @@ export default {
       });
     }
     return new Response(
-      `Radixia Blog MCP server\n\nMCP endpoint (Streamable HTTP): ${url.origin}/mcp\nLegacy SSE endpoint: ${url.origin}/sse\nServer card: ${url.origin}/.well-known/mcp.json\n\nTools: list_posts, search_posts, get_post, list_tags, about_radixia\nContent source: https://blog.radixia.ai (Ghost Content API, read-only)\n`,
+      `Radixia Blog MCP server\n\nMCP endpoint (Streamable HTTP): ${url.origin}/mcp\nLegacy SSE endpoint: ${url.origin}/sse\nServer card: ${url.origin}/.well-known/mcp.json\n\nTools: list_posts, search_posts, get_post, list_tags, about_radixia,\n       search_isc2026_transcripts, get_isc2026_session, get_isc2026_agenda\nContent sources: https://blog.radixia.ai (Ghost Content API, read-only)\n                 https://www.radixia.ai/labs/isc-2026-search (ISC-HPC 2026 transcript corpus)\n`,
       { headers: { "content-type": "text/plain; charset=utf-8" } },
     );
   },
