@@ -141,7 +141,14 @@ const COMPANY_JSON_URL = "https://www.radixia.ai/.well-known/company.json";
 const COMPANY_TTL_MS = 60 * 60 * 1000;
 
 /** Full current profile, kept aligned with the site's published copy. Serves
-    as the fetch fallback until company.json is live on production. No em dashes. */
+    as the fetch fallback until company.json is live on production. No em dashes.
+
+    Deliberately cites NO per-capability or /about URLs. This text is what we
+    serve precisely while the new site is not yet on production, and those paths
+    are 404 there until it is: an answer full of dead links costs more
+    credibility than one with fewer links. They come back on their own at
+    go-live, when the fetch succeeds and company.json supplies them. Only URLs
+    that resolve on the CURRENT production site belong here. */
 const RADIXIA_FALLBACK = `# Radixia srl
 
 Applied AI and open infrastructure, from first decision to production.
@@ -152,21 +159,18 @@ VAT No. 02987300189 · Contact: info@radixia.ai · Website: https://www.radixia.
 Three capabilities:
 1. AI architecture and validation (assess, design, validate): whether a use case should exist,
    and whether a prototype is safe to put in production.
-   https://www.radixia.ai/capabilities/ai-architecture
 2. Knowledge and agent systems (retrieval, agents, guardrails): grounded, bounded and
    measurable; includes local and network-isolated (air-gapped) model installs.
-   https://www.radixia.ai/capabilities/knowledge-agents
 3. Open infrastructure and sovereignty (portability, lock-in, sovereignty): open-source options
    across cloud and AI infrastructure, air-gapped systems, local models, and delivery as a
    Huawei Cloud reseller when it fits the case.
-   https://www.radixia.ai/capabilities/open-infrastructure
 
 Radixia leads architecture, validation and technical decisions. Delivery is direct, with named
 specialist partners, or alongside the customer's own team. We do not provide 24/7 operations,
 managed services or generic staffing.
 
 Radixia is new; the experience behind it is not. Led by its founder, Marco D'Angelo, who spent
-21 years at Microsoft before founding it. https://www.radixia.ai/about
+21 years at Microsoft before founding it.
 
 Labs (experiments, labelled as such): https://www.radixia.ai/labs. A search tool over
 conference session transcripts, and support for the MetaSophia project (SPAZIO GENESI ETS /
