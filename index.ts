@@ -197,9 +197,14 @@ function renderRadixiaProfile(d: any): string {
     });
   }
 
-  if (d.delivery || (Array.isArray(d.doesNotProvide) && d.doesNotProvide.length)) {
+  const hasOptions = Array.isArray(d.deliveryOptions) && d.deliveryOptions.length;
+  if (d.delivery || hasOptions || (Array.isArray(d.doesNotProvide) && d.doesNotProvide.length)) {
     L.push("", "## Delivery");
     if (d.delivery) L.push(d.delivery);
+    /* Where work can run, including the Huawei Cloud reseller framing. Kept
+       separate from the capability descriptions on purpose: it states how
+       delivery happens, not what a capability is. */
+    if (hasOptions) L.push(`Delivery options: ${d.deliveryOptions.join("; ")}.`);
     if (Array.isArray(d.doesNotProvide) && d.doesNotProvide.length)
       L.push(`Does not provide: ${d.doesNotProvide.join(", ")}.`);
   }
