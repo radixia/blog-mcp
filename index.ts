@@ -21,6 +21,8 @@ interface Env {
   MCP_OBJECT: DurableObjectNamespace;
   /** Override the ISC corpus base URL (local dev/testing). */
   ISC_BASE?: string;
+  /** Override the company.json URL (e.g. point at the preview deploy). */
+  COMPANY_URL?: string;
 }
 
 interface GhostPost {
@@ -118,12 +120,165 @@ const postCard = (p: GhostPost) =>
     p.primary_author?.name ? `author: ${p.primary_author.name}` : null,
     p.tags?.length ? `tags: ${p.tags.map((t) => t.name).join(", ")}` : null,
     p.reading_time ? `reading time: ${p.reading_time} min` : null,
-    `url: https://blog.radixia.ai/${p.slug}/`,
+    `url: https://www.radixia.ai/blog/${p.slug}/`,
     "",
     (p.custom_excerpt || p.excerpt || "").trim(),
   ]
     .filter((l) => l !== null)
     .join("\n");
+
+/* about_radixia serves the company profile from the site's single source of
+   truth: company.json, built from the same copy that renders the site pages,
+   so it cannot drift. The rendered result is cached in the isolate for ~1h.
+
+   Until the site's go-live, that file is 404 on production (it currently ships
+   only on the content-2026-09 preview deploy), so the fetch fails and the
+   FALLBACK below is what the tool actually returns for now: the full, current
+   profile, not a reduced one. The fetch URL stays the production origin on
+   purpose, so the tool flips to the live JSON automatically at go-live with no
+   code change. Set COMPANY_URL (env) to aim the fetch at the preview to test. */
+const COMPANY_JSON_URL = "https://www.radixia.ai/.well-known/company.json";
+const COMPANY_TTL_MS = 60 * 60 * 1000;
+
+/** Full current profile, kept aligned with the site's published copy. Serves
+    as the fetch fallback until company.json is live on production. No em dashes. */
+const RADIXIA_FALLBACK = `# Radixia srl
+
+Applied AI and open infrastructure, from first decision to production.
+
+Italian technology company, founded March 2025. Via Ernesto Gragnani 18, 27100 Pavia (PV), Italy.
+VAT No. 02987300189 · Contact: info@radixia.ai · Website: https://www.radixia.ai
+
+Three capabilities:
+1. AI architecture and validation (assess, design, validate): whether a use case should exist,
+   and whether a prototype is safe to put in production.
+   https://www.radixia.ai/capabilities/ai-architecture
+2. Knowledge and agent systems (retrieval, agents, guardrails): grounded, bounded and
+   measurable; includes local and network-isolated (air-gapped) model installs.
+   https://www.radixia.ai/capabilities/knowledge-agents
+3. Open infrastructure and sovereignty (portability, lock-in, sovereignty): open-source options
+   across cloud and AI infrastructure, air-gapped systems, local models, and delivery as a
+   Huawei Cloud reseller when it fits the case.
+   https://www.radixia.ai/capabilities/open-infrastructure
+
+Radixia leads architecture, validation and technical decisions. Delivery is direct, with named
+specialist partners, or alongside the customer's own team. We do not provide 24/7 operations,
+managed services or generic staffing.
+
+Radixia is new; the experience behind it is not. Led by its founder, Marco D'Angelo, who spent
+21 years at Microsoft before founding it. https://www.radixia.ai/about
+
+Labs (experiments, labelled as such): https://www.radixia.ai/labs. A search tool over
+conference session transcripts, and support for the MetaSophia project (SPAZIO GENESI ETS /
+ABAQ) on identifying printmaking techniques in digitised artworks.
+
+Ecosystem: member of the Eclipse Foundation and the Eclipse Cloud Interest Group.
+
+Blog (English, technical): https://www.radixia.ai/blog. AI, agents, MCP, serverless,
+open source. Named authors: Marco D'Angelo, Luca Bianchi.`;
+
+let companyProfileCache: { at: number; url: string; text: string } | null = null;
+
+/** Render company.json into ~model-friendly plain facts. No em dashes. */
+function renderRadixiaProfile(d: any): string {
+  const L: string[] = [];
+  L.push(`# ${d.legalName || "Radixia s.r.l."}${d.name ? ` (${d.name})` : ""}`);
+  if (d.descriptor) L.push("", d.descriptor);
+  const founded = [d.founded ? `Founded ${d.founded}.` : null, d.maturity || null].filter(Boolean).join(" ");
+  if (founded) L.push("", founded);
+  if (d.url) L.push(`Website: ${d.url}`);
+
+  if (Array.isArray(d.capabilities) && d.capabilities.length) {
+    L.push("", "## Capabilities");
+    d.capabilities.forEach((c: any, i: number) => {
+      L.push(`${i + 1}. ${c.title}${c.summary ? ` (${c.summary})` : ""}`);
+      if (c.description) L.push(`   ${c.description}`);
+      if (c.url) L.push(`   ${c.url}`);
+    });
+  }
+
+  if (d.delivery || (Array.isArray(d.doesNotProvide) && d.doesNotProvide.length)) {
+    L.push("", "## Delivery");
+    if (d.delivery) L.push(d.delivery);
+    if (Array.isArray(d.doesNotProvide) && d.doesNotProvide.length)
+      L.push(`Does not provide: ${d.doesNotProvide.join(", ")}.`);
+  }
+
+  const f = d.founder;
+  if (f?.name) {
+    L.push("", "## Founder");
+    L.push([`${f.name}${f.role ? `, ${f.role}` : ""}.`, f.summary].filter(Boolean).join(" "));
+    if (f.linkedin) L.push(`LinkedIn: ${f.linkedin}`);
+    if (Array.isArray(f.rolesOutsideRadixia) && f.rolesOutsideRadixia.length) {
+      L.push("Roles outside Radixia:");
+      f.rolesOutsideRadixia.forEach((r: string) => L.push(`- ${r}`));
+    }
+    if (f.note) L.push(f.note);
+  }
+
+  if (d.location || d.legal || d.contact) {
+    L.push("", "## Company");
+    const loc = d.location;
+    if (loc?.address) L.push(`${loc.address}${loc.addressType ? ` (${loc.addressType})` : ""}${loc.country ? `, ${loc.country}` : ""}.`);
+    const lg = d.legal;
+    if (lg) {
+      const bits = [lg.vat && `VAT ${lg.vat}`, lg.rea && `REA ${lg.rea}`, lg.shareCapital && `Share capital ${lg.shareCapital}`].filter(Boolean);
+      if (bits.length) L.push(bits.join(" · ") + ".");
+    }
+    const ct = d.contact;
+    if (ct) {
+      const bits = [ct.email, ct.form].filter(Boolean);
+      if (bits.length) L.push(`Contact: ${bits.join(" · ")}`);
+    }
+  }
+
+  if ((Array.isArray(d.memberships) && d.memberships.length) || (Array.isArray(d.partners) && d.partners.length)) {
+    L.push("", "## Ecosystem");
+    if (Array.isArray(d.memberships) && d.memberships.length)
+      L.push(`Memberships: ${d.memberships.map((m: any) => `${m.name}${m.relationship ? ` (${m.relationship})` : ""}`).join(", ")}.`);
+    if (Array.isArray(d.partners) && d.partners.length)
+      L.push(`Partners: ${d.partners.map((p: any) => `${p.name}${p.url ? ` (${p.url})` : ""}`).join(", ")}.`);
+  }
+
+  const b = d.blog;
+  if (b?.url) {
+    L.push("", "## Blog");
+    L.push(
+      `${b.url}${b.language ? ` (${b.language})` : ""}.` +
+        (Array.isArray(b.topics) && b.topics.length ? ` Topics: ${b.topics.join(", ")}.` : "") +
+        (Array.isArray(b.authors) && b.authors.length ? ` Authors: ${b.authors.join(", ")}.` : ""),
+    );
+  }
+
+  if (d.labs) L.push("", "## Labs", d.labs);
+
+  const a = d.agentSurface;
+  if (a) {
+    const bits = [a.mcp && `MCP ${a.mcp}`, a.serverCard && `server card ${a.serverCard}`, a.llmsTxt && `llms.txt ${a.llmsTxt}`].filter(Boolean);
+    if (bits.length) L.push("", "## Agent surface", bits.join(" · ") + ".");
+  }
+
+  if (d.updated) L.push("", `(Profile as published on the Radixia site, updated ${d.updated}.)`);
+  return L.join("\n");
+}
+
+/** Fetch + render the profile, cached ~1h per isolate; fallback on any error. */
+async function radixiaProfile(url = COMPANY_JSON_URL): Promise<string> {
+  if (companyProfileCache && companyProfileCache.url === url && Date.now() - companyProfileCache.at < COMPANY_TTL_MS)
+    return companyProfileCache.text;
+  try {
+    const res = await fetch(url, {
+      headers: { accept: "application/json" },
+      signal: AbortSignal.timeout(4000),
+    });
+    if (!res.ok) throw new Error(`company.json ${res.status}`);
+    const text = renderRadixiaProfile(await res.json());
+    companyProfileCache = { at: Date.now(), url, text };
+    return text;
+  } catch {
+    return RADIXIA_FALLBACK; // not cached, so the next call retries
+  }
+}
 
 export class RadixiaBlogMCP extends McpAgent<Env> {
   server = new McpServer({
@@ -309,31 +464,9 @@ export class RadixiaBlogMCP extends McpAgent<Env> {
 
     this.server.tool(
       "about_radixia",
-      "Who is Radixia? Company profile, the four pillars, projects and contacts.",
+      "Who is Radixia? Company profile: the three capabilities, leadership, Labs, ecosystem and contacts.",
       {},
-      async () => ({
-        content: [
-          {
-            type: "text",
-            text: `# Radixia srl
-
-"Where bold ideas take root and thrive."
-
-Italian technology company — Via Ernesto Gragnani 18, 27100 Pavia (PV), Italy.
-VAT No. 02987300189 · Contact: info@radixia.ai · Website: https://www.radixia.ai
-
-Four pillars:
-1. Enterprise AI — governance, security and scalability for AI workloads.
-   Project Nemesis: AI safety platform for HSE in oil & gas (H2S monitoring).
-2. Open Cloud — European sovereign cloud; member of the Eclipse Cloud Interest Group.
-3. Networking — people networks and communities; Eclipse Foundation member.
-4. Art — AI for art and artists; supporter of the MetaSophia project (ABAQ / Spazio Genesi ETS).
-
-Blog (English, technical): https://blog.radixia.ai — AI, serverless, MCP, open source.
-Authors: Luca Bianchi, Marco D'Angelo.`,
-          },
-        ],
-      }),
+      async () => ({ content: [{ type: "text", text: await radixiaProfile(this.env.COMPANY_URL) }] }),
     );
   }
 }
