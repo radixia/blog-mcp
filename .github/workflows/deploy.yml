@@ -1,0 +1,73 @@
+# Deploy the MCP Worker on push to main.
+#
+# This exists because of a concrete incident: the corrected company profile was
+# committed and reviewed, but the Worker kept serving the old one for a day,
+# because deploying was a manual `npm run deploy` that nobody ran. The code being
+# right and the code being live were two separate facts, and only one was visible.
+#
+# Requires one repository secret:
+#   CLOUDFLARE_API_TOKEN  a token with "Edit Cloudflare Workers" on this account
+#   CLOUDFLARE_ACCOUNT_ID the account the Worker belongs to
+#
+# GHOST_CONTENT_KEY is a Worker secret set once with `wrangler secret put`; it is
+# not needed here and must not be added, since a deploy does not reset secrets.
+name: Deploy
+
+on:
+  push:
+    branches: [main]
+  # So a deploy can be triggered without an empty commit.
+  workflow_dispatch:
+
+concurrency:
+  group: deploy-worker
+  cancel-in-progress: false
+
+jobs:
+  deploy:
+    runs-on: ubuntu-latest
+    timeout-minutes: 10
+    steps:
+      - uses: actions/checkout@v4
+
+      - uses: actions/setup-node@v4
+        with:
+          node-version: 22
+          cache: npm
+
+      - run: npm ci
+
+      # Compile without publishing first: a broken Worker should fail here rather
+      # than replace a working one.
+      - name: Dry-run build
+        run: npm run check
+
+      - name: Deploy
+        run: npx wrangler deploy
+        env:
+          CLOUDFLARE_API_TOKEN: ${{ secrets.CLOUDFLARE_API_TOKEN }}
+          CLOUDFLARE_ACCOUNT_ID: ${{ secrets.CLOUDFLARE_ACCOUNT_ID }}
+
+      # Proves the deploy took effect, rather than trusting that it did. Durable
+      # Object instances already running keep the old code until they cycle, so a
+      # fresh session id is used to force a new one.
+      - name: Verify the deployed tool answers
+        run: |
+          set -euo pipefail
+          U=https://mcp.radixia.ai/mcp
+          H=(-H 'content-type: application/json' -H 'accept: application/json, text/event-stream')
+          SID=$(curl -sS -D - -o /dev/null -X POST "$U" "${H[@]}" \
+            -d '{"jsonrpc":"2.0","id":1,"method":"initialize","params":{"protocolVersion":"2025-03-26","capabilities":{},"clientInfo":{"name":"ci-'"$GITHUB_RUN_ID"'","version":"1"}}}' \
+            | tr -d '\r' | awk 'tolower($1)=="mcp-session-id:"{print $2}')
+          test -n "$SID" || { echo "no session id returned"; exit 1; }
+          curl -sS -X POST "$U" "${H[@]}" -H "mcp-session-id: $SID" \
+            -d '{"jsonrpc":"2.0","method":"notifications/initialized"}' >/dev/null
+          OUT=$(curl -sS --max-time 30 -X POST "$U" "${H[@]}" -H "mcp-session-id: $SID" \
+            -d '{"jsonrpc":"2.0","id":2,"method":"tools/call","params":{"name":"about_radixia","arguments":{}}}')
+          echo "$OUT" | head -c 400
+          # Guards against the profile regressing to the positioning we retired.
+          for banned in "Four pillars" "Nemesis" "Open Cloud" "take root and thrive"; do
+            if grep -qi "$banned" <<<"$OUT"; then echo "FAIL: about_radixia still mentions '$banned'"; exit 1; fi
+          done
+          grep -q "Three capabilities" <<<"$OUT" || { echo "FAIL: about_radixia is missing the current profile"; exit 1; }
+          echo "ok: the deployed profile is current"
