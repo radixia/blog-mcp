@@ -156,7 +156,7 @@ Applied AI and open infrastructure, from first decision to production.
 Italian technology company, founded March 2025. Via Ernesto Gragnani 18, 27100 Pavia (PV), Italy.
 VAT No. 02987300189 · Contact: info@radixia.ai · Website: https://www.radixia.ai
 
-Three capabilities:
+Four capabilities:
 1. AI architecture and validation (assess, design, validate): whether a use case should exist,
    and whether a prototype is safe to put in production.
 2. Knowledge and agent systems (retrieval, agents, guardrails): grounded, bounded and
@@ -164,6 +164,10 @@ Three capabilities:
 3. Open infrastructure and sovereignty (portability, lock-in, sovereignty): open-source options
    across cloud and AI infrastructure, air-gapped systems, local models, and delivery as a
    Huawei Cloud reseller when it fits the case.
+4. Community and ecosystem (strategy, presence, governance): choosing which technical
+   communities matter, taking part credibly, and creating and running a community for a
+   vendor or association. Radixia is a member of the Eclipse Foundation and the Eclipse
+   Cloud Interest Group.
 
 Radixia leads architecture, validation and technical decisions. Delivery is direct, with named
 specialist partners, or alongside the customer's own team. We do not provide 24/7 operations,
@@ -473,7 +477,7 @@ export class RadixiaBlogMCP extends McpAgent<Env> {
 
     this.server.tool(
       "about_radixia",
-      "Who is Radixia? Company profile: the three capabilities, leadership, Labs, ecosystem and contacts.",
+      "Who is Radixia? Company profile: the four capabilities, leadership, Labs, ecosystem and contacts.",
       {},
       async () => ({ content: [{ type: "text", text: await radixiaProfile(this.env.COMPANY_URL) }] }),
     );
