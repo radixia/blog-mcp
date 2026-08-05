@@ -508,12 +508,22 @@ export default {
     if (url.pathname === "/sse" || url.pathname === "/sse/message") {
       return RadixiaBlogMCP.serveSSE("/sse").fetch(request, env, ctx);
     }
-    if (url.pathname === "/.well-known/mcp.json" || url.pathname === "/.well-known/mcp/server-card.json") {
+    // `<streamable-http-url>/server-card` is the location SEP-2127 recommends,
+    // relative to the MCP endpoint. The two `.well-known` paths predate it: one is
+    // the superseded SEP-1649 form, the other appears in no primary document at
+    // all. Both stay, because things are already pointed at them, but the
+    // endpoint-relative path is now the canonical one and is what we advertise.
+    if (
+      url.pathname === "/.well-known/mcp.json" ||
+      url.pathname === "/.well-known/mcp/server-card.json" ||
+      url.pathname === "/mcp/server-card"
+    ) {
       // Server card follows the MCP registry server.json schema (the older
       // "draft/server-card" schema URL no longer resolves); the tool list
       // rides in the _meta extension point.
       const card =
-        url.pathname === "/.well-known/mcp/server-card.json"
+        url.pathname === "/.well-known/mcp/server-card.json" ||
+        url.pathname === "/mcp/server-card"
           ? {
               $schema: "https://static.modelcontextprotocol.io/schemas/2025-12-11/server.schema.json",
               name: "ai.radixia/blog",
@@ -530,9 +540,27 @@ export default {
         headers: { "content-type": "application/json", "access-control-allow-origin": "*" },
       });
     }
-    return new Response(
-      `Radixia Blog MCP server\n\nMCP endpoint (Streamable HTTP): ${url.origin}/mcp\nLegacy SSE endpoint: ${url.origin}/sse\nServer card: ${url.origin}/.well-known/mcp.json\n\nTools: list_posts, search_posts, get_post, list_tags, about_radixia,\n       search_conference_transcripts, get_conference_session, get_conference_agenda\nContent sources: https://blog.radixia.ai (Ghost Content API, read-only)\n                 https://www.radixia.ai/labs/isc-2026-search (conference session transcript corpus)\n`,
-      { headers: { "content-type": "text/plain; charset=utf-8" } },
-    );
+    if (url.pathname === "/" || url.pathname === "") {
+      return new Response(
+        `Radixia Blog MCP server\n\nMCP endpoint (Streamable HTTP): ${url.origin}/mcp\nLegacy SSE endpoint: ${url.origin}/sse\nServer card: ${url.origin}/mcp/server-card\n\nTools: list_posts, search_posts, get_post, list_tags, about_radixia,\n       search_conference_transcripts, get_conference_session, get_conference_agenda\nContent sources: https://blog.radixia.ai (Ghost Content API, read-only)\n                 https://www.radixia.ai/labs/isc-2026-search (conference session transcript corpus)\n`,
+        { headers: { "content-type": "text/plain; charset=utf-8" } },
+      );
+    }
+
+    // Everything else is genuinely absent, and has to say so.
+    //
+    // This host used to answer EVERY unmatched path with 200 and the blurb above.
+    // That makes it impossible for any client or crawler to tell "this document
+    // exists" from "this document does not", and it turns a correct absence into
+    // what looks like a malformed document: we publish no OAuth Protected
+    // Resource Metadata because this server is public and unauthenticated, and
+    // authorization is OPTIONAL under the MCP specification.
+    //
+    // Our own census measured this host and recorded /mcp/server-card as
+    // `not_a_document` — the probe was right, the server was wrong.
+    return new Response("Not found\n", {
+      status: 404,
+      headers: { "content-type": "text/plain; charset=utf-8" },
+    });
   },
 };
