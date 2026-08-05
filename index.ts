@@ -109,7 +109,7 @@ function iscTrimOverlap(prev: string, cur: string) {
 }
 
 const ISC_DISCLAIMER =
-  "Transcripts are auto-generated captions: names and technical terms may contain recognition errors — verify quotes against the session recordings. Independent tool, not affiliated with ISC. Timestamps are offsets into each recording. Human-friendly search UI: " +
+  "Transcripts are auto-generated captions: names and technical terms may contain recognition errors, so verify quotes against the session recordings. Independent tool, not affiliated with the conference organisers. Timestamps are offsets into each recording. Human-friendly search UI: " +
   ISC_TOOL_URL;
 
 const postCard = (p: GhostPost) =>
@@ -392,8 +392,8 @@ export class RadixiaBlogMCP extends McpAgent<Env> {
     );
 
     this.server.tool(
-      "search_isc2026_transcripts",
-      "Full-text search across 147 auto-generated session transcripts from ISC High Performance 2026 (Hamburg, June 23-25): keynotes, panels, vendor talks, research papers. Returns matching passages with session title, day/time/hall and recording timestamp. Quoted phrases must match exactly.",
+      "search_conference_transcripts",
+      "Full-text search across 147 auto-generated session transcripts from the technical conferences Radixia attends: keynotes, panels, vendor talks, research papers. Returns matching passages with session title, day/time/hall and recording timestamp. Quoted phrases must match exactly.",
       {
         query: z.string().min(2).describe("Search terms; wrap exact phrases in double quotes"),
         limit: z.number().min(1).max(25).default(8).describe("Max passages to return"),
@@ -429,8 +429,8 @@ export class RadixiaBlogMCP extends McpAgent<Env> {
     );
 
     this.server.tool(
-      "get_isc2026_session",
-      "Read the full auto-generated transcript of one ISC 2026 session by (part of) its title. Use search_isc2026_transcripts or get_isc2026_agenda first to find session titles.",
+      "get_conference_session",
+      "Read the full auto-generated transcript of one conference session by (part of) its title. Use search_conference_transcripts or get_conference_agenda first to find session titles.",
       {
         title: z.string().min(3).describe("Session title or a distinctive part of it, e.g. 'Opening Keynote' or 'TOP500'"),
       },
@@ -438,7 +438,7 @@ export class RadixiaBlogMCP extends McpAgent<Env> {
         const { sessions, chunks } = await iscData(this.env.ISC_BASE);
         const q = title.toLowerCase();
         const s = sessions.find((x) => x.title.toLowerCase() === q) || sessions.find((x) => x.title.toLowerCase().includes(q));
-        if (!s) return { content: [{ type: "text", text: `No ISC 2026 session matching "${title}". Try get_isc2026_agenda for the list.` }] };
+        if (!s) return { content: [{ type: "text", text: `No indexed session matching "${title}". Try get_conference_agenda for the list.` }] };
         const list = chunks.filter((c) => c.s === s.i).sort((a, b) => a.id - b.id);
         const paras: string[] = [];
         for (let i = 0; i < list.length; i++) {
@@ -451,8 +451,8 @@ export class RadixiaBlogMCP extends McpAgent<Env> {
     );
 
     this.server.tool(
-      "get_isc2026_agenda",
-      "The ISC High Performance 2026 program (Hamburg, June 23-25): session blocks with times, halls, types and speakers, plus the recorded research-paper talks. Optionally filter by day.",
+      "get_conference_agenda",
+      "The program of the conference sessions currently indexed: session blocks with times, halls, types and speakers, plus the recorded research-paper talks. Optionally filter by day.",
       {
         day: z.enum(["Tuesday", "Wednesday", "Thursday"]).optional().describe("Conference day to filter"),
       },
@@ -487,14 +487,14 @@ export class RadixiaBlogMCP extends McpAgent<Env> {
 const SERVER_CARD = {
   name: "Radixia Blog",
   description:
-    "Public, read-only MCP server for the Radixia technical blog (AI, serverless architectures, open source, cloud) and the Radixia Labs ISC-HPC 2026 transcript corpus (147 searchable session transcripts).",
+    "Public, read-only MCP server for the Radixia technical blog (AI, serverless architectures, open source, cloud) and a corpus of conference session transcripts from the events Radixia attends (147 searchable sessions).",
   version: "1.1.0",
   vendor: { name: "Radixia srl", url: "https://www.radixia.ai" },
   endpoints: { streamableHttp: "/mcp", sse: "/sse" },
   capabilities: {
     tools: [
       "list_posts", "search_posts", "get_post", "list_tags", "about_radixia",
-      "search_isc2026_transcripts", "get_isc2026_session", "get_isc2026_agenda",
+      "search_conference_transcripts", "get_conference_session", "get_conference_agenda",
     ],
   },
 };
@@ -531,7 +531,7 @@ export default {
       });
     }
     return new Response(
-      `Radixia Blog MCP server\n\nMCP endpoint (Streamable HTTP): ${url.origin}/mcp\nLegacy SSE endpoint: ${url.origin}/sse\nServer card: ${url.origin}/.well-known/mcp.json\n\nTools: list_posts, search_posts, get_post, list_tags, about_radixia,\n       search_isc2026_transcripts, get_isc2026_session, get_isc2026_agenda\nContent sources: https://blog.radixia.ai (Ghost Content API, read-only)\n                 https://www.radixia.ai/labs/isc-2026-search (ISC-HPC 2026 transcript corpus)\n`,
+      `Radixia Blog MCP server\n\nMCP endpoint (Streamable HTTP): ${url.origin}/mcp\nLegacy SSE endpoint: ${url.origin}/sse\nServer card: ${url.origin}/.well-known/mcp.json\n\nTools: list_posts, search_posts, get_post, list_tags, about_radixia,\n       search_conference_transcripts, get_conference_session, get_conference_agenda\nContent sources: https://blog.radixia.ai (Ghost Content API, read-only)\n                 https://www.radixia.ai/labs/isc-2026-search (conference session transcript corpus)\n`,
       { headers: { "content-type": "text/plain; charset=utf-8" } },
     );
   },
