@@ -69,5 +69,16 @@ jobs:
           for banned in "Four pillars" "Nemesis" "Open Cloud" "take root and thrive"; do
             if grep -qi "$banned" <<<"$OUT"; then echo "FAIL: about_radixia still mentions '$banned'"; exit 1; fi
           done
-          grep -q "Three capabilities" <<<"$OUT" || { echo "FAIL: about_radixia is missing the current profile"; exit 1; }
-          echo "ok: the deployed profile is current"
+          # Assert on the capability titles, not on a spelled-out count. The
+          # profile renders two ways: from the site's company.json when it is
+          # reachable, and from the hand-written fallback when it is not. Only the
+          # titles are identical in both, because company.json derives them from
+          # the same pillar array the site renders. This check used to grep for
+          # "Three capabilities", which lived in the fallback alone: it broke the
+          # moment a fourth capability was added, and would have broken again when
+          # company.json goes live and the count is never spelled out.
+          for want in "AI architecture and validation" "Knowledge and agent systems" \
+                      "Open infrastructure and sovereignty" "Community and ecosystem"; do
+            grep -q "$want" <<<"$OUT" || { echo "FAIL: about_radixia does not mention '$want'"; exit 1; }
+          done
+          echo "ok: the deployed profile lists all four capabilities"
